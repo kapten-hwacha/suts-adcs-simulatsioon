@@ -12,8 +12,8 @@ igrf_model = iut.load_shcfile(IGRF_FILE)
 
 def get_b_field_NED(latitude: float, longitude: float, altitude: float, date: datetime) -> np.ndarray:
     """ 
-    expcets latitude and longitude in degrees, altitude in kilometers,
-    returns magnetic field vector in Gauss
+    expects latitude and longitude in degrees, altitude in kilometers
+    returns magnetic field vector in Gauss (in NED frame)
     """
     # convert year to decimal year
     year_start = datetime(date.year, 1, 1)

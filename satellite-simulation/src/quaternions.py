@@ -5,7 +5,7 @@ class Quaternion:
     def __init__(self, w, x, y, z):
         self.q = np.array([w, x, y, z])
     
-    # methods for clener access to quaternion elements outside the class
+    # methods for cleaner access to quaternion elements outside the class
     @property
     def w(self):
         return self.q[0]
@@ -26,9 +26,12 @@ class Quaternion:
     def vector(self) -> np.ndarray:
         return np.array([self.x, self.y, self.z])
 
-    # overwritten arithmetic operations for cleanliness
+    # overwritten arithmetic operations
     def __add__(self, other: "Quaternion") -> "Quaternion":
         return Quaternion(*(self.q + other.q))
+
+    def __sub__(self, other: "Quaternion") -> "Quaternion":
+        return Quaternion(*(self.q - other.q))
 
     def __mul__(self, other: Union["Quaternion", float, int]) -> "Quaternion":
         if isinstance(other, Quaternion):
@@ -60,18 +63,19 @@ class Quaternion:
         """ return conjugate quaternion """
         return Quaternion(self.w, -self.x, -self.y, -self.z)
 
-    # conversion to euler angles (as 3 element vector)
     def to_euler(self) -> np.ndarray:
+        """ return equivalent rotation in Euler angle notation as a vector of [roll, pitch, yaw] """
         w, x, y, z = self.q
         # Roll (x-axis rotation)
         roll = np.arctan2(2*(w*x + y*z), 1 - 2*(x**2 + y**2))
         # Pitch (y-axis rotation)
-        pitch = np.arcsin(2*(w*y - z*x))
+        pitch = np.arcsin(np.clip(2*(w*y - z*x), -1, 1))  # avoid gimbal lock
         # Yaw (z-axis rotation)
         yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y**2 + z**2))
         return np.array([roll, pitch, yaw])
     
     def to_rotation_matrix(self) -> np.ndarray:
+        """ return equivalent rotation in rotation matrix notation (3x3 matrix) """
         w, x, y, z = self.q
         
         return np.array([
