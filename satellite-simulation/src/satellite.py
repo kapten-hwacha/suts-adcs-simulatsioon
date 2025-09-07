@@ -80,12 +80,17 @@ class Satellite:
             @todo: implement disturbances
         """
         # set new error quaternion (body to eci rotation)
-        self.q_body_to_eci_error = q_body_to_eci_target * self.q_body_to_eci.get_conjugate()
-        self.q_body_to_eci_error.normalize()  # there might be fp numerical errors
+        q_body_to_eci_error = q_body_to_eci_target * self.q_body_to_eci.get_conjugate()
+        q_body_to_eci_error.normalize()  # there might be fp numerical errors
 
         # ensure the scalar part of the error quaternion is positive to avoid jumps
-        # if self.q_body_to_eci_error.w > 0:
-        #     self.q_body_to_eci_error = self.q_body_to_eci_error * -1
+        # finds the largest quaternion element by magnitude
+        i = np.argmax(np.abs(q_body_to_eci_error.vector))
+        if self.q_body_to_eci_error.vector[i] * q_body_to_eci_error.vector[i] < 0:
+            self.q_body_to_eci_error = q_body_to_eci_error * -1
+        else:
+            self.q_body_to_eci_error = q_body_to_eci_error
+
         self.omega_target = omega_body_target
         
         # DYNAMICS

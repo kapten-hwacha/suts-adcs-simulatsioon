@@ -14,7 +14,7 @@ np.set_printoptions(precision=2, formatter={'float_kind': lambda x: "%.2e" % x})
 # SIMULATION SETTINGS
 # -------------------
 
-SIMULATION_TIME = 1  # hours
+SIMULATION_TIME = 0.1  # hours
 SIMULATION_STEP = 1  # seconds
 OMEGA_MAX = 0.1  # rad/s
 OMEGA_MAX_DETUMBLED = 0.0002  # rad/s
@@ -26,6 +26,7 @@ MAX_ALTITUDE = 600  # km
 RANDOM = False  # if orbit parameters are generated randomly
 SKIP_DETUMBLE = True  # skips the detumbling part, initial angular velocity already low
 UPDATE_TARGET = True
+UPDATE_TARGET_DT = 5  # s
 
 # POINT TO BE TRACKED
 # -------------------
@@ -41,9 +42,9 @@ LONGITUDE_POINT = ...
 BDOT_GAIN = 7e-5
 
 # PID
-KP = 1e-5
+KP = 1e-4
 KI = 0
-KD = 3e-3
+KD = 0
 """
 KD is nicely dampened with 1e-3 when target is not updated
 """
@@ -152,7 +153,9 @@ def main():
 
     commanded_torques = []
     applied_torques = []
+    target_q_vectors = []
     error_q_vectors = []
+    attitude_q_vectors = [] # New list for actual attitude quaternions
     omega_vectors = []
     b_field_x = []
     b_field_y = []
@@ -162,6 +165,7 @@ def main():
     print_status(date, altitude, latitude, longitude, attitude, omega)
 
     # simulation loop
+    t_update_target = 0
     for step in range(1, num_steps):
         date += timedelta(seconds=dt)
         t = dt * step
@@ -182,10 +186,11 @@ def main():
         omega_lvlh_in_body = satellite.q_body_to_eci.to_rotation_matrix().T @ omega_lvlh_in_eci
         # q_body_to_lvlh = satellite.q_body_to_eci * q_eci_to_lvlh
 
-        if UPDATE_TARGET and (satellite.state == "FINE_POINT_NADIR" or satellite.state == "COARSE_POINT_NADIR"):
+        if UPDATE_TARGET and (t - t_update_target >= UPDATE_TARGET_DT) and (satellite.state == "FINE_POINT_NADIR" or satellite.state == "COARSE_POINT_NADIR"):
             q_body_to_lvlh_target = Quaternion(1, 0, 0, 0)  # unit quaternion for nadir pointing
             q_body_to_eci_target = q_eci_to_lvlh.get_conjugate() * q_body_to_lvlh_target
             q_body_to_eci_target.normalize()
+            t_update_target = t
 
         if np.any(np.isnan(satellite.omega)):
             print(f"\nSIMULATION BLEW UP ON STEP {step}!\n")
@@ -198,10 +203,12 @@ def main():
         angular_speeds[satellite.state].append(np.linalg.norm(satellite.omega))
         error_q_vectors.append(satellite.q_body_to_eci_error.vector)
         omega_vectors.append(satellite.omega)
+        target_q_vectors.append(q_body_to_eci_target.vector)
+        attitude_q_vectors.append(satellite.q_body_to_eci.vector) # Append actual attitude quaternion
 
-        b_field_x.append(b_field[0])
-        b_field_y.append(b_field[1])
-        b_field_z.append(b_field[2])
+        b_field_x.append(satellite.B_field_gauss[0]) # Use satellite's B_field_gauss
+        b_field_y.append(satellite.B_field_gauss[1]) # Use satellite's B_field_gauss
+        b_field_z.append(satellite.B_field_gauss[2]) # Use satellite's B_field_gauss
 
         if PRINT:
             print(f"step {step}")
@@ -216,6 +223,8 @@ def main():
     applied_torques = np.array(applied_torques)
     error_q_vectors = np.array(error_q_vectors)
     omega_vectors = np.array(omega_vectors)
+    target_q_vectors = np.array(target_q_vectors)
+    attitude_q_vectors = np.array(attitude_q_vectors) # Convert to NumPy array
     b_field_x = np.array(b_field_x)
     b_field_y = np.array(b_field_y)
     b_field_z = np.array(b_field_z)
@@ -247,9 +256,36 @@ def main():
     plt.title("Attitude Error Vector Elements Progression")
     plt.grid(True)
 
-    # Plot 3: Angular Velocity Components Progression
+    # Plot 3: Target Attitude Quaternion Vector Elements Progression
     fig3 = plt.figure(figsize=(10, 6))
-    fig3.canvas.manager.set_window_title("Angular Velocity Components Progression")
+    if fig3.canvas.manager:
+        fig3.canvas.manager.set_window_title("Target Attitude Quaternion Vector Elements Progression")
+    plt.plot(T, target_q_vectors[:, 0], label="q1", linestyle='-')
+    plt.plot(T, target_q_vectors[:, 1], label="q2", linestyle='--')
+    plt.plot(T, target_q_vectors[:, 2], label="q3", linestyle=':')
+    plt.ylabel("Vector Element Value")
+    plt.xlabel("Time [h]")
+    plt.legend()
+    plt.title("Target Attitude Quaternion Vector Elements Progression")
+    plt.grid(True)
+
+    # Plot 4: Actual Attitude Quaternion Vector Elements Progression
+    fig4 = plt.figure(figsize=(10, 6))
+    if fig4.canvas.manager:
+        fig4.canvas.manager.set_window_title("Actual Attitude Quaternion Vector Elements Progression")
+    plt.plot(T, attitude_q_vectors[:, 0], label="q1", linestyle='-')
+    plt.plot(T, attitude_q_vectors[:, 1], label="q2", linestyle='--')
+    plt.plot(T, attitude_q_vectors[:, 2], label="q3", linestyle=':')
+    plt.ylabel("Vector Element Value")
+    plt.xlabel("Time [h]")
+    plt.legend()
+    plt.title("Actual Attitude Quaternion Vector Elements Progression")
+    plt.grid(True)
+
+    # Plot 5: Angular Velocity Components Progression
+    fig5 = plt.figure(figsize=(10, 6))
+    if fig5.canvas.manager:
+        fig5.canvas.manager.set_window_title("Angular Velocity Components Progression")
     plt.plot(T, omega_vectors[:, 0], label="omega_x", linestyle='-')
     plt.plot(T, omega_vectors[:, 1], label="omega_y", linestyle='--')
     plt.plot(T, omega_vectors[:, 2], label="omega_z", linestyle=':')
@@ -259,9 +295,10 @@ def main():
     plt.title("Angular Velocity Components Progression")
     plt.grid(True)
 
-    # Plot 4: Applied Control Torque Components Progression
-    fig4 = plt.figure(figsize=(10, 6))
-    fig4.canvas.manager.set_window_title("Control Torque Components Progression")
+    # Plot 6: Applied Control Torque Components Progression
+    fig6 = plt.figure(figsize=(10, 6))
+    if fig6.canvas.manager:
+        fig6.canvas.manager.set_window_title("Control Torque Components Progression")
     plt.plot(T, applied_torques[:, 0], label="Applied Torque X", linestyle='-')
     plt.plot(T, applied_torques[:, 1], label="Applied Torque Y", linestyle='--')
     plt.plot(T, applied_torques[:, 2], label="Applied Torque Z", linestyle=':')
@@ -272,9 +309,10 @@ def main():
     plt.ylim(bottom=0)
     plt.grid(True)
 
-    # Plot 5: B-field Components Progression
-    fig5 = plt.figure(figsize=(10, 6))
-    fig5.canvas.manager.set_window_title("B-field Components Progression")
+    # Plot 7: B-field Components Progression
+    fig7 = plt.figure(figsize=(10, 6))
+    if fig7.canvas.manager:
+        fig7.canvas.manager.set_window_title("B-field Components Progression")
     plt.plot(T, b_field_x, label="B_x", linestyle='-')
     plt.plot(T, b_field_y, label="B_y", linestyle='--')
     plt.plot(T, b_field_z, label="B_z", linestyle=':')
