@@ -6,7 +6,7 @@ from scipy.linalg import sqrtm
 
 class Controller(ABC):
     """ abstract base class for all controller implementations """
-    
+
     @abstractmethod
     # returns control torque vector (3D)
     def get_control_torque(self, satellite: "Satellite", dt: float) -> np.ndarray:
@@ -25,7 +25,7 @@ class PID(Controller):
     def get_control_torque(self, satellite: "Satellite", dt: float) -> np.ndarray:
         """ calculates the control torque using the PID control law """
 
-        q = satellite.attitude_q
+        q = satellite.q_body_to_eci_error
         
         # accumulate error and clip if threshold is set
         self.integral += q.vector * dt
@@ -33,7 +33,7 @@ class PID(Controller):
             np.clip(self.integral, -self.integral_max, self.integral_max, out=self.integral)
 
         # PID control law (using omega as derivative: cuts noise)
-        torque = -self.kp * q.vector - self.ki * self.integral - self.kd * satellite.omega.flatten()
+        torque = -self.kp * q.vector - self.ki * self.integral - self.kd * (satellite.omega - satellite.omega_target)
 
         return torque  # return 1d vector (x, y, z)
 
@@ -115,7 +115,7 @@ class LQR(Controller):
         return np.linalg.inv(satellite.inertia_tensor) @ satellite.omega
     
     def get_control_torque(self, satellite: "Satellite", dt: float) -> np.ndarray:
-        q = satellite.attitude_q
+        q = satellite.q_body_to_eci_error
         x = np.concat((satellite.omega, q.vector))
 
         return self.G @ x

@@ -13,7 +13,7 @@ def xyz_to_spherical(vec_xyz: np.ndarray) -> np.ndarray:
     r = np.linalg.norm(vec_xyz)
     longitude_rad = np.arctan2(y, x)
     latitude_rad = np.arctan2(z, np.linalg.norm(vec_xyz[:2])) # Geocentric latitude
-    return np.array([r, longitude_rad, latitude_rad])
+    return np.array([r, latitude_rad, longitude_rad])
 
 
 def spherical_to_xyz(vec_spherical: np.ndarray) -> np.ndarray:

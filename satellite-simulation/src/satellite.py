@@ -9,13 +9,14 @@ from igrf_wrapper import *
 
 class ControllerMap(TypedDict):
     DETUMBLE: Controller
-    POINT: Controller
+    COARSE_POINT_NADIR: Controller
+    FINE_POINT_NADIR: Controller
 
 
 class Satellite:
     # all values are in satellite's body frame
     def __init__(self,
-                attidude_quaternion: Quaternion,
+                q_body_eci: Quaternion,
                 angular_velocity: np.ndarray,
                 inertia_tensor: np.ndarray,
                 controllers: ControllerMap,
@@ -26,14 +27,17 @@ class Satellite:
         assert angular_velocity.shape == (3,), "Angular velocity vector must be a 3 element vector!"
         assert inertia_tensor.shape == (3, 3), "Inertia tensor must be a 3x3 matrix!"
 
-        self.attitude_q = attidude_quaternion  # Quaternion representing the satellite's attidude (in vector form)
+        self.q_body_to_eci_error = Quaternion()  # valid initialization
+        self.q_body_to_eci = q_body_eci  # Quaternion representing the satellite's attidude (in vector form)
         self.omega = angular_velocity  # Angular velocity vector (x, y, z)
+        self.omega_target = np.zeros(3)
         self.controllers = controllers
         self.inertia_tensor = inertia_tensor
         self.inertia_tensor_inv = np.linalg.inv(self.inertia_tensor)
         self.B_field_gauss = magnetic_field
         self.torque = np.zeros(3)
         self.state = state
+        self.max_torque = 0.001  # Nm
 
     # for numerical solvers
     def __calculate_alpha(self, torque: np.ndarray, omega: np.ndarray) -> np.ndarray:
@@ -68,25 +72,37 @@ class Satellite:
         else:
             return False
 
-    def update(self, dt: float, angular_speed_orbit: float):
+    def update(self, dt: float, angular_speed_orbit: float, 
+                q_body_to_eci_target: Quaternion, 
+                omega_body_target: np.ndarray = np.zeros(3)):
         """ 
         main iteration loop
             @todo: implement disturbances
         """
-        # DYNAMICS
+        # set new error quaternion (body to eci rotation)
+        self.q_body_to_eci_error = q_body_to_eci_target * self.q_body_to_eci.get_conjugate()
+        self.q_body_to_eci_error.normalize()  # there might be fp numerical errors
 
+        # ensure the scalar part of the error quaternion is positive to avoid jumps
+        # if self.q_body_to_eci_error.w > 0:
+        #     self.q_body_to_eci_error = self.q_body_to_eci_error * -1
+        self.omega_target = omega_body_target
+        
+        # DYNAMICS
         if self.state not in self.controllers:
             raise ValueError(f"invalid state: {self.state}")
-        
+
         controller = self.controllers[self.state]
-        control_torque = controller.get_control_torque(self, dt)
+        commanded_torque = controller.get_control_torque(self, dt)
+        applied_torque = np.clip(commanded_torque, -self.max_torque, self.max_torque)
+
         external_torque = 0  # model external torque, ie disturbances somehow
-        self.torque = control_torque + external_torque
+        self.torque = applied_torque + external_torque
 
         # KINEMATICS
         
         # using advanced numerical solver for stability
-        y0 = np.concatenate((self.omega, self.attitude_q.q))
+        y0 = np.concatenate((self.omega, self.q_body_to_eci.q))
         sol = solve_ivp(
             fun=self.__get_derivatives,
             t_span=[0, dt],
@@ -96,19 +112,29 @@ class Satellite:
 
         # unpack solver results
         self.omega = sol.y[0:3, -1]
-        self.attitude_q = Quaternion(*sol.y[3:7, -1])
+        self.q_body_to_eci = Quaternion(*sol.y[3:7, -1])
 
         # normalize the quaternion to ensure it remains a unit quaternion
-        self.attitude_q.normalize()
-        
-        # condition for changing the state
-        detumbled = False
-        if self.state == "DETUMBLE" and self.__is_detumbled(angular_speed_orbit):
-            self.state = "POINT"
-            detumbled = True
+        self.q_body_to_eci.normalize()
 
-        return control_torque, detumbled  # return for debugging
+        # state transistion logic
+        match self.state:
+
+            case "DETUMBLE":
+                if self.__is_detumbled(angular_speed_orbit):
+                    self.state = "COARSE_POINT_NADIR"
+
+            case "COARSE_POINT_NADIR":
+                pass
+
+            case "FINE_POINT_NADIR":
+                pass
+
+            case _:
+                raise NotImplementedError(f"state {self.state} has no implemented transistion logic!")
+
+        return commanded_torque, applied_torque  # return both for debugging
 
     def get_attitude(self) -> np.ndarray:
         """ returns satellite orientation as Euler angles """
-        return self.attitude_q.vector
+        return self.q_body_to_eci.to_euler()

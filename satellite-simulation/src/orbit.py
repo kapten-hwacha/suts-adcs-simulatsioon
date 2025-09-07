@@ -89,20 +89,26 @@ class Orbit:
         E = newton(kepler, E0, dE_kepler, args=(mean_anomaly, self.eccentricity))
         return E
     
-    def __get_rotation_matrix_eci_to_ecef(self, time_elapsed) -> np.ndarray:
+    def vector_eci_to_ecef(self, time_elapsed: float, vec_eci: np.ndarray) -> np.ndarray:
         ERA = self.initial_ERA + OMEGA_EARTH * time_elapsed
         R_Z_ERA = np.array((
             [np.cos(ERA), -np.sin(ERA), 0],
             [np.sin(ERA), np.cos(ERA), 0],
             [0, 0, 1]
         ))
-        return R_Z_ERA
+        return R_Z_ERA @ vec_eci
+
+    def __get_velocity_perifocal(self, nu, r) -> np.ndarray:
+        """ returns a velocity vector [x, y, z] in the perifocal frame """
+        h = np.sqrt(MU * self.semi_major_axis * (1 - self.eccentricity**2))
+        vx = -(MU / h) * np.sin(nu)
+        vy = (MU / h) * (self.eccentricity + np.cos(nu))
+        return np.array(([vx, vy, 0]))
 
     def propagate(self, time_elapsed: float) -> tuple:
         """ 
         function to be iteratively called for orbit propagation:
-        
-        returns altitude, latitude, longitude
+        returns position and velocity vector [x, y, z] in the eci frame
         """
         M = self.angular_rate * time_elapsed + self.M0  # mean anomaly
 
@@ -117,12 +123,8 @@ class Orbit:
         # translate position vector from perifocal to ECI frame
         r_peri = np.array([r * np.cos(nu), r * np.sin(nu), 0])
         r_eci = self.R_perifocal_to_eci @ r_peri
-        R_eci_to_ecef = self.__get_rotation_matrix_eci_to_ecef(time_elapsed)
-        r_ecef = R_eci_to_ecef @ r_eci
-        altitude, latitude, longitude = xyz_to_spherical(r_ecef)
-        altitude -= RADIUS_EARTH
 
-        latitude_deg = np.rad2deg(latitude)
-        longitude_deg = np.rad2deg(longitude)
+        v_peri = self.__get_velocity_perifocal(nu, r)
+        v_eci = self.R_perifocal_to_eci @ v_peri
 
-        return altitude, latitude_deg, longitude_deg
+        return r_eci, v_eci

@@ -2,7 +2,7 @@ import numpy as np
 from typing import Union
 
 class Quaternion:
-    def __init__(self, w, x, y, z):
+    def __init__(self, w=1, x=0, y=0, z=0):
         self.q = np.array([w, x, y, z])
     
     # methods for cleaner access to quaternion elements outside the class
@@ -85,7 +85,36 @@ class Quaternion:
         ])
 
 
-def get_random_unit_quaternion() -> "Quaternion":
+def rotation_matrix_to_quaternion(R: np.ndarray) -> Quaternion:
+    assert R.shape == (3,3), "Rotation matrix must be a 3x3 matrix!"
+    trace = np.trace(R)
+    if trace > 0:
+        w = np.sqrt(1 + trace) / 2
+        x = (R[2, 1] - R[1, 2]) / (4 * w)
+        y = (R[0, 2] - R[2, 0]) / (4 * w)
+        z = (R[1, 0] - R[0, 1]) / (4 * w)
+    else:
+        # Find the largest diagonal element to determine the primary axis
+        i = np.argmax([R[0, 0], R[1, 1], R[2, 2]])
+        if i == 0: # R[0,0] is largest
+            x = np.sqrt(1 + R[0, 0] - R[1, 1] - R[2, 2]) / 2
+            w = (R[2, 1] - R[1, 2]) / (4 * x)
+            y = (R[0, 1] + R[1, 0]) / (4 * x)
+            z = (R[0, 2] + R[2, 0]) / (4 * x)
+        elif i == 1: # R[1,1] is largest
+            y = np.sqrt(1 + R[1, 1] - R[0, 0] - R[2, 2]) / 2
+            w = (R[0, 2] - R[2, 0]) / (4 * y)
+            x = (R[0, 1] + R[1, 0]) / (4 * y)
+            z = (R[1, 2] + R[2, 1]) / (4 * y)
+        else: # R[2,2] is largest
+            z = np.sqrt(1 + R[2, 2] - R[0, 0] - R[1, 1]) / 2
+            w = (R[1, 0] - R[0, 1]) / (4 * z)
+            x = (R[0, 2] + R[2, 0]) / (4 * z)
+            y = (R[1, 2] + R[2, 1]) / (4 * z)
+    return Quaternion(w, x, y, z)
+
+
+def get_random_unit_quaternion() -> Quaternion:
     q = Quaternion(*np.random.uniform(-1, 1, 4))
     q.normalize()
     return q
