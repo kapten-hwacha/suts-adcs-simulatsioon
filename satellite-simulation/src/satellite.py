@@ -14,14 +14,18 @@ class ControllerMap(TypedDict):
 
 
 class Satellite:
+    """
+    @todo implement max jerk for actuators
+    """
     # all values are in satellite's body frame
     def __init__(self,
                 q_body_eci: Quaternion,
                 angular_velocity: np.ndarray,
                 inertia_tensor: np.ndarray,
                 controllers: ControllerMap,
+                detumbled_omega: float,
                 magnetic_field: np.ndarray = np.zeros(3),
-                state: str = "DETUMBLE"
+                state: str = "DETUMBLE",
                 ):
 
         assert angular_velocity.shape == (3,), "Angular velocity vector must be a 3 element vector!"
@@ -37,7 +41,7 @@ class Satellite:
         self.B_field_gauss = magnetic_field
         self.torque = np.zeros(3)
         self.state = state
-        self.max_torque = 0.001  # Nm
+        self.max_torque = 0.005  # Nm
 
     # for numerical solvers
     def __calculate_alpha(self, torque: np.ndarray, omega: np.ndarray) -> np.ndarray:
@@ -84,16 +88,26 @@ class Satellite:
         q_body_to_eci_error.normalize()  # there might be fp numerical errors
 
         # ensure the scalar part of the error quaternion is positive to avoid jumps
-        # finds the largest quaternion element by magnitude
-        i = np.argmax(np.abs(self.q_body_to_eci_error.vector))
-        if self.q_body_to_eci_error.vector[i] * q_body_to_eci_error.vector[i] < 0:
-            self.q_body_to_eci_error = q_body_to_eci_error * -1
-        else:
-            self.q_body_to_eci_error = q_body_to_eci_error
-        # if q_body_to_eci_error.w < 0:
+        # this is exhibits mysterious behaviour atm
+        # @todo understand why this works as it does atm
+
+        # approach 1
+        # i = np.argmax(np.abs(self.q_body_to_eci_error.vector))
+        # if self.q_body_to_eci_error.vector[i] * q_body_to_eci_error.vector[i] < 0:
         #     self.q_body_to_eci_error = q_body_to_eci_error * -1
         # else:
         #     self.q_body_to_eci_error = q_body_to_eci_error
+
+        # approach 2
+        # if q_body_to_eci_error.w * self.q_body_to_eci_error.w < 0:
+        #     self.q_body_to_eci_error = q_body_to_eci_error * -1
+        # else:
+        #     self.q_body_to_eci_error = q_body_to_eci_error
+        
+        # approach 0
+        self.q_body_to_eci_error = q_body_to_eci_error
+
+        print(f'attitude error is {self.q_body_to_eci_error}')
 
         self.omega_target = omega_body_target
         

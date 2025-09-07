@@ -15,15 +15,20 @@ class Controller(ABC):
 
 
 class PID(Controller):
-    def __init__(self, kp: float, ki: float, kd: float, integral_max: float = -1):
+    def __init__(self, kp: float, ki: float, kd: float, integral_max: float = -1, tau_derivative: float = 1e-9):
         self.kp = kp  # proportional gain
         self.ki = ki  # integral gain
         self.kd = kd  # derivative gain
         self.integral = np.zeros(3)
 
         self.integral_max = integral_max
-        self.tau_d = 0.05
+        self.tau_d = tau_derivative
         self.filtered_omega_error = np.zeros(3)
+
+        # for debugging
+        self.proportional_terms = []
+        self.integral_terms = []
+        self.derivative_terms = []
 
     def get_control_torque(self, satellite: "Satellite", dt: float) -> np.ndarray:
         """ calculates the control torque using the PID control law """
@@ -42,8 +47,16 @@ class PID(Controller):
             alpha = dt / (self.tau_d + dt)
             self.filtered_omega_error = alpha * omega_error + (1 - alpha) * self.filtered_omega_error
 
-        # PID control law (using omega as derivative: cuts noise)
-        torque = -self.kp * q.vector - self.ki * self.integral - self.kd * self.filtered_omega_error
+        # PID control law
+        proportional_term = -self.kp * q.vector
+        integral_term = - self.ki * self.integral
+        derivative_term = -self.kd * self.filtered_omega_error
+        torque = proportional_term + integral_term + derivative_term
+
+        # for debugging
+        self.proportional_terms.append(proportional_term)
+        self.integral_terms.append(integral_term)
+        self.derivative_terms.append(derivative_term)
 
         return torque  # return 1d vector (x, y, z)
 
@@ -110,22 +123,8 @@ class LQR(Controller):
         R_inv = np.linalg.inv(R)
         return -F @ A - A.T @ F + F @ B @ R_inv @ B.T @ F - Q
     
-    def __calculate_q_dot_vec(self, satellite):
-        """ calculate the vector part of q-dot """
-        w, x, y, z = satellite.attitude_q.q
-        O = np.array((
-            [w, -z, y],
-            [z, w, -x],
-            [-y, x, w]
-        ))
-        
-        return 0.5 * O @ satellite.omega
-    
-    def __calculate_omega_dot(self, satellite):
-        return np.linalg.inv(satellite.inertia_tensor) @ satellite.omega
-    
     def get_control_torque(self, satellite: "Satellite", dt: float) -> np.ndarray:
         q = satellite.q_body_to_eci_error
-        x = np.concat((satellite.omega, q.vector))
+        x = np.concatenate((satellite.omega, q.vector))
 
         return self.G @ x

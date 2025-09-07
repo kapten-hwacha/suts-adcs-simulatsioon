@@ -51,6 +51,9 @@ class Quaternion:
     def __rmul__(self, other: Union[float, int]) -> "Quaternion":
         return self.__mul__(other)
 
+    def __str__(self) -> str:
+        return f'w={self.w}, x={self.x}, y={self.y}, z={self.z}'
+
     # normalization for unit constraint
     def normalize(self) -> None:
         norm = np.linalg.norm(self.q)

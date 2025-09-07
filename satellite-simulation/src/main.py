@@ -14,8 +14,8 @@ np.set_printoptions(precision=2, formatter={'float_kind': lambda x: "%.2e" % x})
 # SIMULATION SETTINGS
 # -------------------
 
-SIMULATION_TIME = 0.1  # hours
-SIMULATION_STEP = 1  # seconds
+SIMULATION_TIME = 0.0025  # hours
+SIMULATION_STEP = 0.1  # seconds
 OMEGA_MAX = 0.1  # rad/s
 OMEGA_MAX_DETUMBLED = 0.001  # rad/s
 INERTIA_DIAG_MIN = 0.001
@@ -26,7 +26,7 @@ MAX_ALTITUDE = 600  # km
 RANDOM = False  # if orbit parameters are generated randomly
 SKIP_DETUMBLE = True  # skips the detumbling part, initial angular velocity already low
 UPDATE_TARGET = False
-UPDATE_TARGET_DT = 30  # s
+UPDATE_TARGET_DT = 5  # s
 
 # POINT TO BE TRACKED
 # -------------------
@@ -42,11 +42,9 @@ LONGITUDE_POINT = ...
 BDOT_GAIN = 7e-5
 
 # PID
-KI = 0
-
-KP = 1e-3
-KD = 1e-3
-KD = 0
+KI = 3e-4
+KP = 2.5e-2
+KD = 5e-2
 
 # KP = 1.6e-2
 # KD = 6e-2
@@ -124,8 +122,7 @@ def main():
         omega = np.random.uniform(-OMEGA_MAX, OMEGA_MAX, 3)
         state = "DETUMBLE"
 
-    attitude = get_random_unit_quaternion()
-    attitude = Quaternion()
+    q_body_to_eci = get_random_unit_quaternion()
     inertia_tensor = np.zeros(shape=(3, 3))
     np.fill_diagonal(inertia_tensor, np.random.uniform(INERTIA_DIAG_MIN, INERTIA_DIAG_MAX, 3))
 
@@ -133,10 +130,10 @@ def main():
     r_eci, v_eci = orbit.propagate(0)
     r_ecef = orbit.vector_eci_to_ecef(0, r_eci)
     altitude, latitude, longitude = get_position_geodetic(r_ecef)
-    b_field =  body_to_ned(get_b_field_NED(latitude, longitude, altitude, date), attitude)
+    b_field =  body_to_ned(get_b_field_NED(latitude, longitude, altitude, date), q_body_to_eci)
 
     bdot_controller = BDot(BDOT_GAIN, b_field)
-    pid_controller = PID(kp=KP, ki=KI, kd=KD)
+    pid_controller = PID(kp=KP, ki=KI, kd=KD, tau_derivative=0.1)
     lqr_controller = LQR(R=R, Q=Q, J=inertia_tensor)
 
     # map controllers to states
@@ -146,7 +143,7 @@ def main():
         "FINE_POINT_NADIR": lqr_controller
     }
 
-    satellite = Satellite(attitude, omega, inertia_tensor, controllers, b_field, state)
+    satellite = Satellite(q_body_to_eci, omega, inertia_tensor, controllers, OMEGA_MAX_DETUMBLED, b_field, state)
 
     total_time = SIMULATION_TIME * 3600 # total simulation time
     dt = SIMULATION_STEP
@@ -168,11 +165,23 @@ def main():
     b_field_x = []
     b_field_y = []
     b_field_z = []
+    pid_proportional_terms_x = []
+    pid_proportional_terms_y = []
+    pid_proportional_terms_z = []
+    pid_integral_terms_x = []
+    pid_integral_terms_y = []
+    pid_integral_terms_z = []
+    pid_derivative_terms_x = []
+    pid_derivative_terms_y = []
+    pid_derivative_terms_z = []
     
     print(f"Simulation starting at")
-    print_status(date, altitude, latitude, longitude, attitude, omega)
+    print_status(date, altitude, latitude, longitude, q_body_to_eci, omega)
 
     q_body_to_eci_target = get_random_unit_quaternion()
+
+    print(f'initial attitude is {q_body_to_eci}')
+    print(f'target attitude is {q_body_to_eci_target}')
 
     # simulation loop
     t_update_target = 0
@@ -213,11 +222,32 @@ def main():
         error_q_vectors.append(satellite.q_body_to_eci_error.vector)
         omega_vectors.append(satellite.omega)
         target_q_vectors.append(q_body_to_eci_target.vector)
-        attitude_q_vectors.append(satellite.q_body_to_eci.vector) # Append actual attitude quaternion
+        attitude_q_vectors.append(satellite.q_body_to_eci.vector)
 
         b_field_x.append(satellite.B_field_gauss[0]) # Use satellite's B_field_gauss
         b_field_y.append(satellite.B_field_gauss[1]) # Use satellite's B_field_gauss
         b_field_z.append(satellite.B_field_gauss[2]) # Use satellite's B_field_gauss
+
+        if satellite.state == "COARSE_POINT_NADIR":
+            pid_proportional_terms_x.append(pid_controller.proportional_terms[-1][0])
+            pid_proportional_terms_y.append(pid_controller.proportional_terms[-1][1])
+            pid_proportional_terms_z.append(pid_controller.proportional_terms[-1][2])
+            pid_integral_terms_x.append(pid_controller.integral_terms[-1][0])
+            pid_integral_terms_y.append(pid_controller.integral_terms[-1][1])
+            pid_integral_terms_z.append(pid_controller.integral_terms[-1][2])
+            pid_derivative_terms_x.append(pid_controller.derivative_terms[-1][0])
+            pid_derivative_terms_y.append(pid_controller.derivative_terms[-1][1])
+            pid_derivative_terms_z.append(pid_controller.derivative_terms[-1][2])
+        else:
+            pid_proportional_terms_x.append(0)
+            pid_proportional_terms_y.append(0)
+            pid_proportional_terms_z.append(0)
+            pid_integral_terms_x.append(0)
+            pid_integral_terms_y.append(0)
+            pid_integral_terms_z.append(0)
+            pid_derivative_terms_x.append(0)
+            pid_derivative_terms_y.append(0)
+            pid_derivative_terms_z.append(0)
 
         if PRINT:
             print(f"step {step}")
@@ -237,6 +267,16 @@ def main():
     b_field_x = np.array(b_field_x)
     b_field_y = np.array(b_field_y)
     b_field_z = np.array(b_field_z)
+
+    pid_proportional_terms_x = np.array(pid_proportional_terms_x)
+    pid_proportional_terms_y = np.array(pid_proportional_terms_y)
+    pid_proportional_terms_z = np.array(pid_proportional_terms_z)
+    pid_integral_terms_x = np.array(pid_integral_terms_x)
+    pid_integral_terms_y = np.array(pid_integral_terms_y)
+    pid_integral_terms_z = np.array(pid_integral_terms_z)
+    pid_derivative_terms_x = np.array(pid_derivative_terms_x)
+    pid_derivative_terms_y = np.array(pid_derivative_terms_y)
+    pid_derivative_terms_z = np.array(pid_derivative_terms_z)
 
     # Plot 1: Angular Speed Progression
     fig1 = plt.figure(figsize=(10, 6))
@@ -330,6 +370,46 @@ def main():
     plt.legend()
     plt.title("B-field Components Progression")
     plt.grid(True)
+
+    # Plot 8: PID Proportional Terms Progression
+    fig8 = plt.figure(figsize=(10, 6))
+    if fig8.canvas.manager:
+        fig8.canvas.manager.set_window_title("PID Proportional Terms Progression")
+    plt.plot(T, pid_proportional_terms_x, label="Proportional X", linestyle='-')
+    plt.plot(T, pid_proportional_terms_y, label="Proportional Y", linestyle='--')
+    plt.plot(T, pid_proportional_terms_z, label="Proportional Z", linestyle=':')
+    plt.ylabel("Proportional Term Value")
+    plt.xlabel("Time [s]")
+    plt.legend()
+    plt.title("PID Proportional Terms Progression")
+    plt.grid(True)
+
+    # Plot 9: PID Integral Terms Progression
+    fig9 = plt.figure(figsize=(10, 6))
+    if fig9.canvas.manager:
+        fig9.canvas.manager.set_window_title("PID Integral Terms Progression")
+    plt.plot(T, pid_integral_terms_x, label="Integral X", linestyle='-')
+    plt.plot(T, pid_integral_terms_y, label="Integral Y", linestyle='--')
+    plt.plot(T, pid_integral_terms_z, label="Integral Z", linestyle=':')
+    plt.ylabel("Integral Term Value")
+    plt.xlabel("Time [s]")
+    plt.legend()
+    plt.title("PID Integral Terms Progression")
+    plt.grid(True)
+
+    # Plot 10: PID Derivative Terms Progression
+    fig10 = plt.figure(figsize=(10, 6))
+    if fig10.canvas.manager:
+        fig10.canvas.manager.set_window_title("PID Derivative Terms Progression")
+    plt.plot(T, pid_derivative_terms_x, label="Derivative X", linestyle='-')
+    plt.plot(T, pid_derivative_terms_y, label="Derivative Y", linestyle='--')
+    plt.plot(T, pid_derivative_terms_z, label="Derivative Z", linestyle=':')
+    plt.ylabel("Derivative Term Value")
+    plt.xlabel("Time [s]")
+    plt.legend()
+    plt.title("PID Derivative Terms Progression")
+    plt.grid(True)
+
 
     plt.show()
 
