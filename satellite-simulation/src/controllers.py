@@ -20,7 +20,10 @@ class PID(Controller):
         self.ki = ki  # integral gain
         self.kd = kd  # derivative gain
         self.integral = np.zeros(3)
+
         self.integral_max = integral_max
+        self.tau_d = 0.05
+        self.filtered_omega_error = np.zeros(3)
 
     def get_control_torque(self, satellite: "Satellite", dt: float) -> np.ndarray:
         """ calculates the control torque using the PID control law """
@@ -32,8 +35,15 @@ class PID(Controller):
         if self.integral_max > 0:
             np.clip(self.integral, -self.integral_max, self.integral_max, out=self.integral)
 
+        omega_error = satellite.omega - satellite.omega_target
+        
+        # first order low pass filter for the derivative part
+        if self.tau_d > 0 and dt > 0:
+            alpha = dt / (self.tau_d + dt)
+            self.filtered_omega_error = alpha * omega_error + (1 - alpha) * self.filtered_omega_error
+
         # PID control law (using omega as derivative: cuts noise)
-        torque = -self.kp * q.vector - self.ki * self.integral - self.kd * (satellite.omega - satellite.omega_target)
+        torque = -self.kp * q.vector - self.ki * self.integral - self.kd * self.filtered_omega_error
 
         return torque  # return 1d vector (x, y, z)
 

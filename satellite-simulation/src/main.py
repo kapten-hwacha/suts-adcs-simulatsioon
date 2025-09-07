@@ -17,16 +17,16 @@ np.set_printoptions(precision=2, formatter={'float_kind': lambda x: "%.2e" % x})
 SIMULATION_TIME = 0.1  # hours
 SIMULATION_STEP = 1  # seconds
 OMEGA_MAX = 0.1  # rad/s
-OMEGA_MAX_DETUMBLED = 0.0002  # rad/s
+OMEGA_MAX_DETUMBLED = 0.001  # rad/s
 INERTIA_DIAG_MIN = 0.001
-INERTIA_DIAG_MAX = 0.0035  # kg * m^2
-PRINT = True  # enables real-time status prints
+INERTIA_DIAG_MAX = 0.006  # kg * m^2
+PRINT = False  # enables real-time status prints
 MIN_ALTITUDE = 300  # km
 MAX_ALTITUDE = 600  # km
 RANDOM = False  # if orbit parameters are generated randomly
 SKIP_DETUMBLE = True  # skips the detumbling part, initial angular velocity already low
-UPDATE_TARGET = True
-UPDATE_TARGET_DT = 5  # s
+UPDATE_TARGET = False
+UPDATE_TARGET_DT = 30  # s
 
 # POINT TO BE TRACKED
 # -------------------
@@ -42,12 +42,14 @@ LONGITUDE_POINT = ...
 BDOT_GAIN = 7e-5
 
 # PID
-KP = 1e-4
 KI = 0
+
+KP = 1e-3
+KD = 1e-3
 KD = 0
-"""
-KD is nicely dampened with 1e-3 when target is not updated
-"""
+
+# KP = 1.6e-2
+# KD = 6e-2
 
 # LQR
 Q_omega = np.eye(3) * 5
@@ -82,6 +84,8 @@ def get_position_geodetic(r_ecef) -> tuple:
 
 def main():
     date = datetime.now()
+    
+    inertia_tensor = np.zeros(shape=(3, 3))
 
     # generate random parameters for orbit
     if RANDOM:
@@ -92,6 +96,7 @@ def main():
         initial_true_anomaly = np.random.uniform(0, 360)
         earth_rotation_angle = np.random.uniform(0, 360)
         semi_major_axis = np.random.uniform(MIN_ALTITUDE, MAX_ALTITUDE) + RADIUS_EARTH
+        np.fill_diagonal(inertia_tensor, np.random.uniform(INERTIA_DIAG_MIN, INERTIA_DIAG_MAX, 3))
     else:
         eccentricity = 0.001
         inclination = 97.4
@@ -100,6 +105,8 @@ def main():
         initial_true_anomaly = 0
         earth_rotation_angle = 0
         semi_major_axis = (MIN_ALTITUDE + MAX_ALTITUDE) / 2 + RADIUS_EARTH
+        np.fill_diagonal(inertia_tensor, (INERTIA_DIAG_MIN + INERTIA_DIAG_MAX) / 2)
+
 
     orbit = Orbit(semi_major_axis,
                     inclination,
@@ -118,6 +125,7 @@ def main():
         state = "DETUMBLE"
 
     attitude = get_random_unit_quaternion()
+    attitude = Quaternion()
     inertia_tensor = np.zeros(shape=(3, 3))
     np.fill_diagonal(inertia_tensor, np.random.uniform(INERTIA_DIAG_MIN, INERTIA_DIAG_MAX, 3))
 
@@ -164,6 +172,8 @@ def main():
     print(f"Simulation starting at")
     print_status(date, altitude, latitude, longitude, attitude, omega)
 
+    q_body_to_eci_target = get_random_unit_quaternion()
+
     # simulation loop
     t_update_target = 0
     for step in range(1, num_steps):
@@ -176,17 +186,16 @@ def main():
         
         # update satellite B field
         satellite.B_field_gauss = body_to_ned(get_b_field_NED(latitude, longitude, altitude, date), satellite.q_body_to_eci)
-
-        q_body_to_eci_target = Quaternion(1, 0, 0, 0)
         
         x_lvlh, y_lvlh, z_lvlh = eci_to_lvlh(r_eci, v_eci)
         R_eci_to_lvlh = get_rotation_matrix(x_lvlh, y_lvlh, z_lvlh)
         q_eci_to_lvlh = rotation_matrix_to_quaternion(R_eci_to_lvlh)
+        q_eci_to_lvlh.normalize()
+
         omega_lvlh_in_eci = orbit.angular_rate * y_lvlh
         omega_lvlh_in_body = satellite.q_body_to_eci.to_rotation_matrix().T @ omega_lvlh_in_eci
-        # q_body_to_lvlh = satellite.q_body_to_eci * q_eci_to_lvlh
 
-        if UPDATE_TARGET and (t - t_update_target >= UPDATE_TARGET_DT) and (satellite.state == "FINE_POINT_NADIR" or satellite.state == "COARSE_POINT_NADIR"):
+        if UPDATE_TARGET and (t_update_target == 0 or (t - t_update_target >= UPDATE_TARGET_DT) and (satellite.state == "FINE_POINT_NADIR" or satellite.state == "COARSE_POINT_NADIR")):
             q_body_to_lvlh_target = Quaternion(1, 0, 0, 0)  # unit quaternion for nadir pointing
             q_body_to_eci_target = q_eci_to_lvlh.get_conjugate() * q_body_to_lvlh_target
             q_body_to_eci_target.normalize()
@@ -217,7 +226,7 @@ def main():
     print(f"Simulation finishing at")
     print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
 
-    T = np.linspace(0, SIMULATION_TIME, num_steps - 1)
+    T = np.linspace(0, total_time, num_steps - 1) # Use total_time (in seconds) for the time axis
 
     commanded_torques = np.array(commanded_torques)
     applied_torques = np.array(applied_torques)
@@ -238,7 +247,7 @@ def main():
         plt.plot(T[idx:idx + n], array, label=key)
         idx += n
     plt.ylabel("Angular Speed [rad/s]")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("Angular Speed Progression")
     plt.ylim(bottom=0)
@@ -251,7 +260,7 @@ def main():
     plt.plot(T, error_q_vectors[:, 1], label="q2", linestyle='--')
     plt.plot(T, error_q_vectors[:, 2], label="q3", linestyle=':')
     plt.ylabel("Vector Element Value")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("Attitude Error Vector Elements Progression")
     plt.grid(True)
@@ -264,7 +273,7 @@ def main():
     plt.plot(T, target_q_vectors[:, 1], label="q2", linestyle='--')
     plt.plot(T, target_q_vectors[:, 2], label="q3", linestyle=':')
     plt.ylabel("Vector Element Value")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("Target Attitude Quaternion Vector Elements Progression")
     plt.grid(True)
@@ -277,7 +286,7 @@ def main():
     plt.plot(T, attitude_q_vectors[:, 1], label="q2", linestyle='--')
     plt.plot(T, attitude_q_vectors[:, 2], label="q3", linestyle=':')
     plt.ylabel("Vector Element Value")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("Actual Attitude Quaternion Vector Elements Progression")
     plt.grid(True)
@@ -290,7 +299,7 @@ def main():
     plt.plot(T, omega_vectors[:, 1], label="omega_y", linestyle='--')
     plt.plot(T, omega_vectors[:, 2], label="omega_z", linestyle=':')
     plt.ylabel("Angular Velocity [rad/s]")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("Angular Velocity Components Progression")
     plt.grid(True)
@@ -303,7 +312,7 @@ def main():
     plt.plot(T, applied_torques[:, 1], label="Applied Torque Y", linestyle='--')
     plt.plot(T, applied_torques[:, 2], label="Applied Torque Z", linestyle=':')
     plt.ylabel("Control Torque [Nm]")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("Applied Control Torque Components Progression")
     plt.ylim(bottom=0)
@@ -317,7 +326,7 @@ def main():
     plt.plot(T, b_field_y, label="B_y", linestyle='--')
     plt.plot(T, b_field_z, label="B_z", linestyle=':')
     plt.ylabel("B-field [Gauss]")
-    plt.xlabel("Time [h]")
+    plt.xlabel("Time [s]") # Changed to seconds
     plt.legend()
     plt.title("B-field Components Progression")
     plt.grid(True)

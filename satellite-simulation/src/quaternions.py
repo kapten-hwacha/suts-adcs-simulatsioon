@@ -73,7 +73,7 @@ class Quaternion:
         # Yaw (z-axis rotation)
         yaw = np.arctan2(2*(w*z + x*y), 1 - 2*(y**2 + z**2))
         return np.array([roll, pitch, yaw])
-    
+
     def to_rotation_matrix(self) -> np.ndarray:
         """ return equivalent rotation in rotation matrix notation (3x3 matrix) """
         w, x, y, z = self.q

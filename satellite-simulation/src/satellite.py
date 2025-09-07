@@ -85,11 +85,15 @@ class Satellite:
 
         # ensure the scalar part of the error quaternion is positive to avoid jumps
         # finds the largest quaternion element by magnitude
-        i = np.argmax(np.abs(q_body_to_eci_error.vector))
+        i = np.argmax(np.abs(self.q_body_to_eci_error.vector))
         if self.q_body_to_eci_error.vector[i] * q_body_to_eci_error.vector[i] < 0:
             self.q_body_to_eci_error = q_body_to_eci_error * -1
         else:
             self.q_body_to_eci_error = q_body_to_eci_error
+        # if q_body_to_eci_error.w < 0:
+        #     self.q_body_to_eci_error = q_body_to_eci_error * -1
+        # else:
+        #     self.q_body_to_eci_error = q_body_to_eci_error
 
         self.omega_target = omega_body_target
         
