@@ -102,13 +102,6 @@ class Satellite:
         # @todo understand why this works as it does atm
 
         # q_body_to_eci_error.unflip()
-
-        # approach suggest on stack overflow for quaternion flip avoidance
-        # i = np.argmax(np.abs(self.q_body_to_eci_error.vector))
-        # if self.q_body_to_eci_error.vector[i] * q_body_to_eci_error.vector[i] < 0:
-        #     self.q_body_to_eci_error = q_body_to_eci_error * -1
-        # else:
-        #     self.q_body_to_eci_error = q_body_to_eci_error
         
         # approach 0
         self.q_body_to_eci_error = q_body_to_eci_error

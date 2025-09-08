@@ -37,7 +37,7 @@ MAX_ALTITUDE = 600  # km
 RANDOM = True  # if orbit parameters are generated randomly
 SKIP_DETUMBLE = True  # skips the detumbling part, initial angular velocity already low
 UPDATE_TARGET = True
-UPDATE_TARGET_DT = 5  # s
+UPDATE_TARGET_DT = 1  # s
 
 # POINT TO BE TRACKED
 # -------------------
@@ -90,6 +90,14 @@ def get_position_geodetic(r_ecef) -> tuple:
     latitude_deg = np.rad2deg(latitude)
     longitude_deg = np.rad2deg(longitude)
     return altitude, latitude_deg, longitude_deg
+
+
+def quaternion_max_unflip(q_prev: Quaternion, q: Quaternion) -> Quaternion:
+    # approach suggest on stack overflow for quaternion flip avoidance
+    i = np.argmax(np.abs(q.q))
+    if q_prev.q[i] * q.q[i] < 0:
+        q *= -1
+    return q
 
 
 def main():
@@ -193,6 +201,7 @@ def main():
 
     # q_body_to_eci_target = get_random_unit_quaternion()
     q_body_to_eci_target = Quaternion()
+    q_body_to_eci_target_prev = Quaternion()
 
     print(f'initial attitude is {q_body_to_eci}')
     print(f'target attitude is {q_body_to_eci_target}')
@@ -222,7 +231,10 @@ def main():
             q_body_to_lvlh_target = Quaternion(1, 0, 0, 0)  # unit quaternion for nadir pointing
             q_body_to_eci_target = q_eci_to_lvlh.get_conjugate() * q_body_to_lvlh_target
             q_body_to_eci_target.normalize()
+            q_body_to_eci_target = quaternion_max_unflip(q_body_to_eci_target_prev, q_body_to_eci_target)
             t_update_target = t
+            q_body_to_eci_target_prev = q_body_to_eci_target
+
 
         if np.any(np.isnan(satellite.omega)):
             print(f"\nSIMULATION BLEW UP ON STEP {step}!\n")

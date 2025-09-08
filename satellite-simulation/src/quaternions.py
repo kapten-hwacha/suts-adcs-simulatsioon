@@ -51,23 +51,26 @@ class Quaternion:
             return Quaternion(*(self.q * other))
         else:
             raise TypeError("Quternion can only be multiplied by other quaternion (or number)")
-    
+
     def __rmul__(self, other: Union[float, int]) -> "Quaternion":
         return self.__mul__(other)
 
     def __str__(self) -> str:
-        return f'w={self.w}, x={self.x}, y={self.y}, z={self.z}'
+        return f'w={self.w:.3f}, x={self.x:.3f}, y={self.y:.3f}, z={self.z:.3f}'
 
     # normalization for unit constraint
     def normalize(self) -> None:
+        """ normalize the quaternion """
         norm = np.linalg.norm(self.q)
         if norm == 0:
             print("cannot normalize zero-quaternion, returning identity")
             self.q = np.array([1.0, 0.0, 0.0, 0.0])
         self.q /= norm
 
-    def unflip(self):
-        if self.w < 0:
+    def w_unflip(self):
+        """ make sure the scalar component stays positive, ie avoid quaternion flips """
+        # the value is not zero since there are floating point calculation errors
+        if self.w < -1e-9:
             self.q *= -1
     
     def get_conjugate(self) -> "Quaternion":
