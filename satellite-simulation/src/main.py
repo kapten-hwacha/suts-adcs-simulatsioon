@@ -11,26 +11,38 @@ from coordinates import xyz_to_spherical
 
 np.set_printoptions(precision=2, formatter={'float_kind': lambda x: "%.2e" % x})
 
+"""
+NOTES
+
+- with pid the control loop needs to run with at least 10 Hz with the current parameters
+    @todo
+    * play around with the gains
+    * play around with the derivative gain low pass filter time constant
+
+
+"""
+
 # SIMULATION SETTINGS
 # -------------------
 
-SIMULATION_TIME = 0.0025  # hours
+SIMULATION_TIME = 1  # hours
 SIMULATION_STEP = 0.1  # seconds
 OMEGA_MAX = 0.1  # rad/s
-OMEGA_MAX_DETUMBLED = 0.001  # rad/s
+OMEGA_MAX_DETUMBLED = 0.01  # rad/s
 INERTIA_DIAG_MIN = 0.001
-INERTIA_DIAG_MAX = 0.006  # kg * m^2
+INERTIA_DIAG_MAX = 0.0035  # kg * m^2
 PRINT = False  # enables real-time status prints
 MIN_ALTITUDE = 300  # km
 MAX_ALTITUDE = 600  # km
-RANDOM = False  # if orbit parameters are generated randomly
+RANDOM = True  # if orbit parameters are generated randomly
 SKIP_DETUMBLE = True  # skips the detumbling part, initial angular velocity already low
-UPDATE_TARGET = False
+UPDATE_TARGET = True
 UPDATE_TARGET_DT = 5  # s
 
 # POINT TO BE TRACKED
 # -------------------
 
+# @todo implement this functionality
 LATITUDE_POINT = ...
 LONGITUDE_POINT = ...
 
@@ -42,9 +54,9 @@ LONGITUDE_POINT = ...
 BDOT_GAIN = 7e-5
 
 # PID
-KI = 3e-4
-KP = 2.5e-2
-KD = 5e-2
+KP = 8e-2
+KI = 0
+KD = 6e-2
 
 # KP = 1.6e-2
 # KD = 6e-2
@@ -105,7 +117,6 @@ def main():
         semi_major_axis = (MIN_ALTITUDE + MAX_ALTITUDE) / 2 + RADIUS_EARTH
         np.fill_diagonal(inertia_tensor, (INERTIA_DIAG_MIN + INERTIA_DIAG_MAX) / 2)
 
-
     orbit = Orbit(semi_major_axis,
                     inclination,
                     eccentricity,
@@ -134,7 +145,9 @@ def main():
 
     bdot_controller = BDot(BDOT_GAIN, b_field)
     pid_controller = PID(kp=KP, ki=KI, kd=KD, tau_derivative=0.1)
-    lqr_controller = LQR(R=R, Q=Q, J=inertia_tensor)
+
+    # @todo understand why the LQR currently only works with these units
+    lqr_controller = LQR_Yang(R=R, Q=Q, J=inertia_tensor)
 
     # map controllers to states
     controllers: ControllerMap = {
@@ -178,7 +191,8 @@ def main():
     print(f"Simulation starting at")
     print_status(date, altitude, latitude, longitude, q_body_to_eci, omega)
 
-    q_body_to_eci_target = get_random_unit_quaternion()
+    # q_body_to_eci_target = get_random_unit_quaternion()
+    q_body_to_eci_target = Quaternion()
 
     print(f'initial attitude is {q_body_to_eci}')
     print(f'target attitude is {q_body_to_eci_target}')
@@ -224,9 +238,9 @@ def main():
         target_q_vectors.append(q_body_to_eci_target.vector)
         attitude_q_vectors.append(satellite.q_body_to_eci.vector)
 
-        b_field_x.append(satellite.B_field_gauss[0]) # Use satellite's B_field_gauss
-        b_field_y.append(satellite.B_field_gauss[1]) # Use satellite's B_field_gauss
-        b_field_z.append(satellite.B_field_gauss[2]) # Use satellite's B_field_gauss
+        b_field_x.append(satellite.B_field_gauss[0])
+        b_field_y.append(satellite.B_field_gauss[1])
+        b_field_z.append(satellite.B_field_gauss[2])
 
         if satellite.state == "COARSE_POINT_NADIR":
             pid_proportional_terms_x.append(pid_controller.proportional_terms[-1][0])
@@ -256,14 +270,14 @@ def main():
     print(f"Simulation finishing at")
     print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
 
-    T = np.linspace(0, total_time, num_steps - 1) # Use total_time (in seconds) for the time axis
+    T = np.linspace(0, total_time, num_steps - 1)
 
     commanded_torques = np.array(commanded_torques)
     applied_torques = np.array(applied_torques)
     error_q_vectors = np.array(error_q_vectors)
     omega_vectors = np.array(omega_vectors)
     target_q_vectors = np.array(target_q_vectors)
-    attitude_q_vectors = np.array(attitude_q_vectors) # Convert to NumPy array
+    attitude_q_vectors = np.array(attitude_q_vectors)
     b_field_x = np.array(b_field_x)
     b_field_y = np.array(b_field_y)
     b_field_z = np.array(b_field_z)

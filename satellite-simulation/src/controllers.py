@@ -84,15 +84,19 @@ class BDot(Controller):
 
 
 
-class LQR(Controller):
+class LQR_Yang(Controller):
     """
+    this controller is derived to asymptodically converge to
+    align the satellite WITH THE ECI FRAME!
+    ie this derivation can not be used to turn the satellite to an arbitrary point
+
     optimal control is uniquely given by u = -R^-1 @ B @ F @ x
 
-        - per Yang (DOI: 10.1061/(ASCE)AS.1943-5525.0000142) we take that
-        matrices J, Q, R are diagonal; this greatly simplifies the controller
+        -   per Yang (DOI: 10.1061/(ASCE)AS.1943-5525.0000142) we take that
+            matrices J, Q, R are diagonal; this greatly simplifies the controller
 
-        - for the system to be globally stable R must be chosen so
-        R = cQ2 or R = c Q2 @ J, where c is const.
+        -   for the system to be globally stable R must be chosen so
+            R = cQ2 or R = c Q2 @ J, where c is const.
     """
     
     A = np.zeros(shape=(6, 6))

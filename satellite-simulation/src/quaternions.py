@@ -26,6 +26,10 @@ class Quaternion:
     def vector(self) -> np.ndarray:
         return np.array([self.x, self.y, self.z])
 
+    @property
+    def norm(self) -> np.floating:
+        return np.linalg.norm(self.vector)
+
     # overwritten arithmetic operations
     def __add__(self, other: "Quaternion") -> "Quaternion":
         return Quaternion(*(self.q + other.q))
@@ -61,6 +65,10 @@ class Quaternion:
             print("cannot normalize zero-quaternion, returning identity")
             self.q = np.array([1.0, 0.0, 0.0, 0.0])
         self.q /= norm
+
+    def unflip(self):
+        if self.w < 0:
+            self.q *= -1
     
     def get_conjugate(self) -> "Quaternion":
         """ return conjugate quaternion """
@@ -120,4 +128,6 @@ def rotation_matrix_to_quaternion(R: np.ndarray) -> Quaternion:
 def get_random_unit_quaternion() -> Quaternion:
     q = Quaternion(*np.random.uniform(-1, 1, 4))
     q.normalize()
+    if (q.w < 0):
+        q *= -1
     return q
