@@ -1,7 +1,7 @@
 import numpy as np
 import os
 from IGRF import igrf_utils as iut
-from datetime import datetime
+from datetime import datetime, timezone
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 # path to the coefficents
@@ -16,8 +16,8 @@ def get_b_field_NED(latitude: float, longitude: float, altitude: float, date: da
     returns magnetic field vector in Gauss (in NED frame)
     """
     # convert year to decimal year
-    year_start = datetime(date.year, 1, 1)
-    year_end = datetime(date.year + 1, 1, 1)
+    year_start = datetime(date.year, 1, 1, tzinfo=timezone.utc)
+    year_end = datetime(date.year + 1, 1, 1, tzinfo=timezone.utc)
     decimal_year = date.year + (date - year_start).total_seconds() / ((year_end - year_start).total_seconds())
     
     # interpolate igrf coefficients linearily
