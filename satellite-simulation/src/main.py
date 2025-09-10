@@ -14,10 +14,14 @@ np.set_printoptions(precision=2, formatter={'float_kind': lambda x: "%.2e" % x})
 """
 NOTES
 
-- with pid the control loop needs to run with at least 10 Hz with the current parameters
-    @todo
-    * play around with the gains
-    * play around with the derivative gain low pass filter time constant
+-   with pid the control loop needs to run with at least 10 Hz with the current parameters
+        @todo
+        * play around with the gains
+        * play around with the derivative gain low pass filter time constant
+
+-   decide whether the whole orbit propagation should be done before the attitude simulation
+    or concurrently with it
+
 
 
 """
@@ -115,7 +119,7 @@ def main():
         earth_rotation_angle = np.random.uniform(0, 360)
         semi_major_axis = np.random.uniform(MIN_ALTITUDE, MAX_ALTITUDE) + RADIUS_EARTH
         np.fill_diagonal(inertia_tensor, np.random.uniform(INERTIA_DIAG_MIN, INERTIA_DIAG_MAX, 3))
-    else:
+    else:   # feel free to change..
         eccentricity = 0.001
         inclination = 97.4
         argument_of_periapsis = 90
@@ -153,8 +157,6 @@ def main():
 
     bdot_controller = BDot(BDOT_GAIN, b_field)
     pid_controller = PID(kp=KP, ki=KI, kd=KD, tau_derivative=0.1)
-
-    # @todo understand why the LQR currently only works with these units
     lqr_controller = LQR_Yang(R=R, Q=Q, J=inertia_tensor)
 
     # map controllers to states
@@ -166,7 +168,7 @@ def main():
 
     satellite = Satellite(q_body_to_eci, omega, inertia_tensor, controllers, OMEGA_MAX_DETUMBLED, b_field, state)
 
-    total_time = SIMULATION_TIME * 3600 # total simulation time
+    total_time = SIMULATION_TIME * 3600
     dt = SIMULATION_STEP
     num_steps = int(total_time / dt)
 
@@ -176,12 +178,11 @@ def main():
         "COARSE_POINT_NADIR": [],
         "FINE_POINT_NADIR": []
     }
-
     commanded_torques = []
     applied_torques = []
     target_q_vectors = []
     error_q_vectors = []
-    attitude_q_vectors = [] # New list for actual attitude quaternions
+    attitude_q_vectors = []
     omega_vectors = []
     b_field_x = []
     b_field_y = []
@@ -199,49 +200,59 @@ def main():
     print(f"Simulation starting at")
     print_status(date, altitude, latitude, longitude, q_body_to_eci, omega)
 
-    # q_body_to_eci_target = get_random_unit_quaternion()
-    q_body_to_eci_target = Quaternion()
-    q_body_to_eci_target_prev = Quaternion()
+    # initailize the variables here in case constant target is used
+    q_body_to_eci_target = get_random_unit_quaternion()
+    q_body_to_eci_target_prev = q_body_to_eci_target
 
     print(f'initial attitude is {q_body_to_eci}')
     print(f'target attitude is {q_body_to_eci_target}')
 
-    # simulation loop
+    # main simulation loop
     t_update_target = 0
     for step in range(1, num_steps):
         date += timedelta(seconds=dt)
         t = dt * step
+        
+        # propagates the orbit to current time
         r_eci, v_eci = orbit.propagate(t)
 
+        # gets position in ECEF reference frame
         r_ecef = orbit.vector_eci_to_ecef(t, r_eci)
         altitude, latitude, longitude = get_position_geodetic(r_ecef)
         
-        # update satellite B field
+        # update satellite B field based on IGRF
         satellite.B_field_gauss = body_to_ned(get_b_field_NED(latitude, longitude, altitude, date), satellite.q_body_to_eci)
-        
+
+        # finds eci to lvlh frame rotation in quaternion form
         x_lvlh, y_lvlh, z_lvlh = eci_to_lvlh(r_eci, v_eci)
         R_eci_to_lvlh = get_rotation_matrix(x_lvlh, y_lvlh, z_lvlh)
         q_eci_to_lvlh = rotation_matrix_to_quaternion(R_eci_to_lvlh)
         q_eci_to_lvlh.normalize()
 
+        # finds how fast lvlh rotates in relation to body frame
+        # @todo ensure this is correct
         omega_lvlh_in_eci = orbit.angular_rate * y_lvlh
         omega_lvlh_in_body = satellite.q_body_to_eci.to_rotation_matrix().T @ omega_lvlh_in_eci
 
+        # updates target for nadir pointing
         if UPDATE_TARGET and (t_update_target == 0 or (t - t_update_target >= UPDATE_TARGET_DT) and (satellite.state == "FINE_POINT_NADIR" or satellite.state == "COARSE_POINT_NADIR")):
             q_body_to_lvlh_target = Quaternion(1, 0, 0, 0)  # unit quaternion for nadir pointing
             q_body_to_eci_target = q_eci_to_lvlh.get_conjugate() * q_body_to_lvlh_target
             q_body_to_eci_target.normalize()
+            # this line ensures the quaternion flip does not occur; this approach deemed more reliable than .w_unflip()
             q_body_to_eci_target = quaternion_max_unflip(q_body_to_eci_target_prev, q_body_to_eci_target)
-            t_update_target = t
             q_body_to_eci_target_prev = q_body_to_eci_target
+            t_update_target = t
 
+        # attitude simulation step; returns torques for plotting
+        commanded_torque, applied_torque = satellite.update(dt, orbit.angular_rate, q_body_to_eci_target)
+        
+        if PRINT:
+            print(f"step {step}")
+            print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
 
-        if np.any(np.isnan(satellite.omega)):
-            print(f"\nSIMULATION BLEW UP ON STEP {step}!\n")
-            break
-
-        commanded_torque, applied_torque = satellite.update(dt, orbit.angular_rate, q_body_to_eci_target)  # this is the main iteration call
-
+        ### ------------------------------------------------------------------------------
+        # saves data for plotting; nothing interesting here
         commanded_torques.append(commanded_torque)
         applied_torques.append(applied_torque)
         angular_speeds[satellite.state].append(np.linalg.norm(satellite.omega))
@@ -249,7 +260,6 @@ def main():
         omega_vectors.append(satellite.omega)
         target_q_vectors.append(q_body_to_eci_target.vector)
         attitude_q_vectors.append(satellite.q_body_to_eci.vector)
-
         b_field_x.append(satellite.B_field_gauss[0])
         b_field_y.append(satellite.B_field_gauss[1])
         b_field_z.append(satellite.B_field_gauss[2])
@@ -274,10 +284,8 @@ def main():
             pid_derivative_terms_x.append(0)
             pid_derivative_terms_y.append(0)
             pid_derivative_terms_z.append(0)
+        ### -----------------------------------------------------------------------------------
 
-        if PRINT:
-            print(f"step {step}")
-            print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
 
     print(f"Simulation finishing at")
     print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
@@ -296,7 +304,6 @@ def main():
     b_field_x = np.array(b_field_x)
     b_field_y = np.array(b_field_y)
     b_field_z = np.array(b_field_z)
-
     pid_proportional_terms_x = np.array(pid_proportional_terms_x)
     pid_proportional_terms_y = np.array(pid_proportional_terms_y)
     pid_proportional_terms_z = np.array(pid_proportional_terms_z)
@@ -438,7 +445,6 @@ def main():
     plt.legend()
     plt.title("PID Derivative Terms Progression")
     plt.grid(True)
-
 
     plt.show()
 

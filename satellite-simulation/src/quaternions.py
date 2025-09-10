@@ -24,6 +24,7 @@ class Quaternion:
     
     @property
     def vector(self) -> np.ndarray:
+        """ vector part of the quaternion """
         return np.array([self.x, self.y, self.z])
 
     @property
@@ -69,8 +70,7 @@ class Quaternion:
 
     def w_unflip(self):
         """ make sure the scalar component stays positive, ie avoid quaternion flips """
-        # the value is not zero since there are floating point calculation errors
-        if self.w < -1e-9:
+        if self.w < 0:
             self.q *= -1
     
     def get_conjugate(self) -> "Quaternion":
@@ -108,29 +108,32 @@ def rotation_matrix_to_quaternion(R: np.ndarray) -> Quaternion:
         y = (R[0, 2] - R[2, 0]) / (4 * w)
         z = (R[1, 0] - R[0, 1]) / (4 * w)
     else:
-        # Find the largest diagonal element to determine the primary axis
+        # find the largest diagonal element to determine the primary axis
         i = np.argmax([R[0, 0], R[1, 1], R[2, 2]])
-        if i == 0: # R[0,0] is largest
-            x = np.sqrt(1 + R[0, 0] - R[1, 1] - R[2, 2]) / 2
-            w = (R[2, 1] - R[1, 2]) / (4 * x)
-            y = (R[0, 1] + R[1, 0]) / (4 * x)
-            z = (R[0, 2] + R[2, 0]) / (4 * x)
-        elif i == 1: # R[1,1] is largest
-            y = np.sqrt(1 + R[1, 1] - R[0, 0] - R[2, 2]) / 2
-            w = (R[0, 2] - R[2, 0]) / (4 * y)
-            x = (R[0, 1] + R[1, 0]) / (4 * y)
-            z = (R[1, 2] + R[2, 1]) / (4 * y)
-        else: # R[2,2] is largest
-            z = np.sqrt(1 + R[2, 2] - R[0, 0] - R[1, 1]) / 2
-            w = (R[1, 0] - R[0, 1]) / (4 * z)
-            x = (R[0, 2] + R[2, 0]) / (4 * z)
-            y = (R[1, 2] + R[2, 1]) / (4 * z)
+        match i:
+            case 0:
+                x = np.sqrt(1 + R[0, 0] - R[1, 1] - R[2, 2]) / 2
+                w = (R[2, 1] - R[1, 2]) / (4 * x)
+                y = (R[0, 1] + R[1, 0]) / (4 * x)
+                z = (R[0, 2] + R[2, 0]) / (4 * x)
+            case 1:
+                y = np.sqrt(1 + R[1, 1] - R[0, 0] - R[2, 2]) / 2
+                w = (R[0, 2] - R[2, 0]) / (4 * y)
+                x = (R[0, 1] + R[1, 0]) / (4 * y)
+                z = (R[1, 2] + R[2, 1]) / (4 * y)
+            case 2:
+                z = np.sqrt(1 + R[2, 2] - R[0, 0] - R[1, 1]) / 2
+                w = (R[1, 0] - R[0, 1]) / (4 * z)
+                x = (R[0, 2] + R[2, 0]) / (4 * z)
+                y = (R[1, 2] + R[2, 1]) / (4 * z)
+            case _:
+                raise RuntimeError
+
     return Quaternion(w, x, y, z)
 
 
 def get_random_unit_quaternion() -> Quaternion:
     q = Quaternion(*np.random.uniform(-1, 1, 4))
+    q.w_unflip()
     q.normalize()
-    if (q.w < 0):
-        q *= -1
     return q
