@@ -14,9 +14,10 @@ class ControllerMap(TypedDict):
 
 
 class Satellite:
-    """
-    @todo implement max jerk for actuators
-    """
+    """ a class for simulating the satellite's attitude with control responses """
+
+    # @todo implement max jerk for actuators
+    
     # all values are in satellite's body frame
     def __init__(self,
                 q_body_eci: Quaternion,
@@ -46,7 +47,7 @@ class Satellite:
         # can be changed to match with the actual specs
         self.max_torque = 0.001  # Nm
         self.max_actuator_jerk = 0.005  # Nm / s
-        
+
         self.fine_point_threshold = np.sqrt(0.02**2 * 3)
         self.revert_to_coarse_point_threshold = np.sqrt(0.1**2 * 3)
 
