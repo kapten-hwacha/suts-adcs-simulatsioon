@@ -282,6 +282,9 @@ def main():
     print(f"Simulation finishing at")
     print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
 
+    #TODO: VTS timeloop data and file writing
+    # Needs: quaternions, positions in ECI, timesteps with the epoch MJD
+
     T = np.linspace(0, total_time, num_steps - 1)
 
     commanded_torques = np.array(commanded_torques)
