@@ -1,6 +1,6 @@
 import numpy as np
 from matplotlib import pyplot as plt
-from datetime import datetime, timedelta
+from datetime import timedelta, datetime, timezone
 from satellite import Satellite, ControllerMap
 from controllers import *
 from igrf_wrapper import *
@@ -8,6 +8,10 @@ from frames import *
 from quaternions import get_random_unit_quaternion, rotation_matrix_to_quaternion
 from orbit import Orbit, RADIUS_EARTH
 from coordinates import xyz_to_spherical
+from file_io import save_quaternion_aem, save_oem_file
+import os
+
+script_path = os.path.dirname(__file__)
 
 np.set_printoptions(precision=2, formatter={'float_kind': lambda x: "%.2e" % x})
 
@@ -73,6 +77,11 @@ Q = np.block([[Q_omega, np.zeros(shape=(3,3))], [np.zeros(shape=(3,3)), Q_attitu
 R = np.eye(3) * 8
 
 # -------------------
+def datetime_to_mjd(date : datetime):
+        """Convert datetime to Modified Julian Date (MJD)."""
+        mjd_epoch = datetime(1858, 11, 17, tzinfo=timezone.utc)
+        delta = date - mjd_epoch
+        return delta.days + delta.seconds / 86400.0 + delta.microseconds / 86400e6
 
 def print_status(date, altitude, latitude, longitude, attitude, omega):
     print(f"date: {date}\
@@ -105,7 +114,8 @@ def quaternion_max_unflip(q_prev: Quaternion, q: Quaternion) -> Quaternion:
 
 
 def main():
-    date = datetime.now()
+    date = datetime.now(timezone.utc)
+    START_MJD = datetime_to_mjd(date)
     
     inertia_tensor = np.zeros(shape=(3, 3))
 
@@ -170,7 +180,7 @@ def main():
 
     total_time = SIMULATION_TIME * 3600
     dt = SIMULATION_STEP
-    num_steps = int(total_time / dt)
+    num_steps = int(total_time / dt) + 1
 
     # lists for plotting
     angular_speeds = {
@@ -183,6 +193,8 @@ def main():
     target_q_vectors = []
     error_q_vectors = []
     attitude_q_vectors = []
+    attitude_q = []
+    position_vectors = []
     omega_vectors = []
     b_field_x = []
     b_field_y = []
@@ -209,7 +221,7 @@ def main():
 
     # main simulation loop
     t_update_target = 0
-    for step in range(1, num_steps):
+    for step in range(0, num_steps):
         date += timedelta(seconds=dt)
         t = dt * step
         
@@ -260,6 +272,8 @@ def main():
         omega_vectors.append(satellite.omega)
         target_q_vectors.append(q_body_to_eci_target.vector)
         attitude_q_vectors.append(satellite.q_body_to_eci.vector)
+        position_vectors.append(r_eci)
+        attitude_q.append(satellite.q_body_to_eci.q)
         b_field_x.append(satellite.B_field_gauss[0])
         b_field_y.append(satellite.B_field_gauss[1])
         b_field_z.append(satellite.B_field_gauss[2])
@@ -290,7 +304,10 @@ def main():
     print(f"Simulation finishing at")
     print_status(date, altitude, latitude, longitude, satellite.q_body_to_eci, satellite.omega)
 
-    T = np.linspace(0, total_time, num_steps - 1)
+    #TODO: VTS timeloop data and file writing
+    # Needs: quaternions, positions in ECI, timesteps with the epoch MJD
+
+    T = np.linspace(0, total_time, num_steps)
 
     commanded_torques = np.array(commanded_torques)
     applied_torques = np.array(applied_torques)
@@ -298,6 +315,8 @@ def main():
     omega_vectors = np.array(omega_vectors)
     target_q_vectors = np.array(target_q_vectors)
     attitude_q_vectors = np.array(attitude_q_vectors)
+    attitude_q = np.array(attitude_q)
+    position_vectors = np.array(position_vectors)
     b_field_x = np.array(b_field_x)
     b_field_y = np.array(b_field_y)
     b_field_z = np.array(b_field_z)
@@ -310,6 +329,20 @@ def main():
     pid_derivative_terms_x = np.array(pid_derivative_terms_x)
     pid_derivative_terms_y = np.array(pid_derivative_terms_y)
     pid_derivative_terms_z = np.array(pid_derivative_terms_z)
+
+    # VTS timeloop
+    VTS_DT = 1 # for vts to work
+    mask = (T % VTS_DT == 0)
+    sampled_quats = attitude_q[mask]
+    sampled_pos = position_vectors[mask]
+    sampled_times = T[mask]
+
+    # In VTS, the first element of the quaternion is the scalar so the quaternions have to mach that
+    save_quaternion_aem(times_seconds=sampled_times, quaternions=sampled_quats, 
+            start_mjd=START_MJD, dt=VTS_DT, filename=os.path.join(script_path, "../VTS/DATA/suts_aem_quaternion.txt"))
+            
+    save_oem_file(times_seconds=sampled_times, positions=sampled_pos, 
+            start_mjd=START_MJD, dt=VTS_DT, filename=os.path.join(script_path, "../VTS/DATA/suts_oem_position.txt"))
 
     # Plot 1: Angular Speed Progression
     fig1 = plt.figure(figsize=(10, 6))
